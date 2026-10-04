@@ -1,5 +1,6 @@
 package com.valuabledropsound;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.inject.Provides;
 import java.util.ArrayList;
@@ -7,6 +8,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 import javax.inject.Inject;
@@ -69,12 +71,21 @@ public class ValuableDropSoundPlugin extends Plugin
 	);
 
 	/**
-	 * Frost dragons only play it for these two, so the rest of what they drop still counts.
+	 * Monsters that play the sound for some of what they drop rather than for all of it, and the drops
+	 * they play it for. A kill that hands one of these over is left to the game, and everything else
+	 * they drop still counts.
 	 */
-	private static final String FROST_DRAGON = "frost dragon";
-	private static final Set<String> FROST_DRAGON_UNIQUES = ImmutableSet.of(
-		"dragon metal sheet",
-		"draconic visage"
+	private static final Map<String, Set<String>> NATIVE_UNIQUES = ImmutableMap.of(
+		"frost dragon", ImmutableSet.of(
+			"dragon metal sheet",
+			"draconic visage"),
+		"nex", ImmutableSet.of(
+			"ancient hilt",
+			"nihil horn",
+			"torva full helm (damaged)",
+			"torva platebody (damaged)",
+			"torva platelegs (damaged)",
+			"zaryte vambraces")
 	);
 
 	/**
@@ -310,15 +321,16 @@ public class ValuableDropSoundPlugin extends Plugin
 
 		if (NATIVE_BOSSES.contains(source)
 			|| source.equals(LUNAR_CHEST)
-			|| (source.equals(FROST_DRAGON) && hasFrostDragonUnique(items)))
+			|| hasNativeUnique(source, items))
 		{
 			nativeTick = client.getTickCount();
 			markAnnounced(items);
 			return;
 		}
 
-		if (nativeTick == client.getTickCount())
+		if (nativeRecently())
 		{
+			markAnnounced(items);
 			return;
 		}
 
@@ -361,12 +373,21 @@ public class ValuableDropSoundPlugin extends Plugin
 		return text.toLowerCase(Locale.ROOT);
 	}
 
-	private boolean hasFrostDragonUnique(Collection<ItemStack> items)
+	/**
+	 * Whether a kill handed over one of the drops its monster plays the sound for itself.
+	 */
+	private boolean hasNativeUnique(String source, Collection<ItemStack> items)
 	{
+		Set<String> uniques = NATIVE_UNIQUES.get(source);
+		if (uniques == null)
+		{
+			return false;
+		}
+
 		for (ItemStack item : items)
 		{
 			String name = itemManager.getItemComposition(item.getId()).getName();
-			if (FROST_DRAGON_UNIQUES.contains(lowerCase(name)))
+			if (uniques.contains(lowerCase(name)))
 			{
 				return true;
 			}
@@ -375,11 +396,21 @@ public class ValuableDropSoundPlugin extends Plugin
 	}
 
 	/**
+	 * Whether the game has just played the sound itself. The loot it played for can be reported a tick
+	 * or two either side of it, so this is a window rather than the one tick it landed on, or the same
+	 * drop gets announced a second time about a second later.
+	 */
+	private boolean nativeRecently()
+	{
+		return nativeTick != NONE && nativeTick >= client.getTickCount() - SOUND_TICKS;
+	}
+
+	/**
 	 * Whether a collection log entry most likely came from somewhere that already played the sound.
 	 */
 	private boolean nativeNearby()
 	{
-		if (nativeTick != NONE && nativeTick >= client.getTickCount() - SOUND_TICKS)
+		if (nativeRecently())
 		{
 			return true;
 		}
