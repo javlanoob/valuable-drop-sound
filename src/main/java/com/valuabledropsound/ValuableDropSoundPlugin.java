@@ -104,6 +104,13 @@ public class ValuableDropSoundPlugin extends Plugin
 	 */
 	private static final int SOUND_TICKS = 2;
 
+	/**
+	 * How long the game playing it keeps this one quiet, in ticks. Hearing it means a drop has already
+	 * been announced, and the loot behind it can be reported a moment either side of the sound, so this
+	 * is a few ticks of grace rather than the one the sound landed on.
+	 */
+	private static final int GRACE_TICKS = 5;
+
 	private static final int NONE = -1;
 
 	@Inject
@@ -120,8 +127,8 @@ public class ValuableDropSoundPlugin extends Plugin
 	private volatile List<Pattern> neverPlay = new ArrayList<>();
 
 	/**
-	 * The last tick loot came from somewhere that plays the sound itself, so a collection log entry
-	 * for it stays quiet too.
+	 * The last tick the game played the sound itself, or loot came from somewhere that does, so a
+	 * collection log entry for it stays quiet too.
 	 */
 	private int nativeTick = NONE;
 
@@ -182,10 +189,12 @@ public class ValuableDropSoundPlugin extends Plugin
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
-		// Another account has its own collection log
+		// Another account has its own collection log, and the tick count starts over
 		if (event.getGameState() == GameState.LOGIN_SCREEN)
 		{
 			announcedItems.clear();
+			nativeTick = NONE;
+			playedTick = NONE;
 		}
 	}
 
@@ -396,13 +405,14 @@ public class ValuableDropSoundPlugin extends Plugin
 	}
 
 	/**
-	 * Whether the game has just played the sound itself. The loot it played for can be reported a tick
-	 * or two either side of it, so this is a window rather than the one tick it landed on, or the same
-	 * drop gets announced a second time about a second later.
+	 * Whether the game has played the sound itself recently enough that anything about to be announced
+	 * is most likely the drop it played for. A tick ahead of the count means a login has set the count
+	 * back, which leaves a tick from before it stale rather than recent.
 	 */
 	private boolean nativeRecently()
 	{
-		return nativeTick != NONE && nativeTick >= client.getTickCount() - SOUND_TICKS;
+		int tick = client.getTickCount();
+		return nativeTick != NONE && nativeTick <= tick && nativeTick >= tick - GRACE_TICKS;
 	}
 
 	/**
