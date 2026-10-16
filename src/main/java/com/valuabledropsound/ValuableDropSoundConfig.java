@@ -12,7 +12,7 @@ public interface ValuableDropSoundConfig extends Config
 	@ConfigItem(
 		keyName = "valuableDrops",
 		name = "Valuable drops",
-		description = "Play for items worth at least the minimum value",
+		description = "Items worth at least the minimum",
 		position = 0
 	)
 	default boolean valuableDrops()
@@ -23,7 +23,7 @@ public interface ValuableDropSoundConfig extends Config
 	@ConfigItem(
 		keyName = "collectionLog",
 		name = "Collection log",
-		description = "Play for new collection log items",
+		description = "New collection log items",
 		position = 1
 	)
 	default boolean collectionLog()
@@ -34,7 +34,7 @@ public interface ValuableDropSoundConfig extends Config
 	@ConfigItem(
 		keyName = "untradeableDrops",
 		name = "Untradeable drops",
-		description = "Play for untradeable items",
+		description = "Untradeable items",
 		position = 2
 	)
 	default boolean untradeableDrops()
@@ -43,10 +43,21 @@ public interface ValuableDropSoundConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "minimumValue",
-		name = "Minimum drop value",
-		description = "Minimum Grand Exchange value of one item",
+		keyName = "groundItemsHighlights",
+		name = "Highlighted items",
+		description = "Items highlighted in Ground Items",
 		position = 3
+	)
+	default boolean groundItemsHighlights()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "minimumValue",
+		name = "Minimum value",
+		description = "GE value of one item",
+		position = 4
 	)
 	default int minimumValue()
 	{
@@ -56,8 +67,8 @@ public interface ValuableDropSoundConfig extends Config
 	@ConfigItem(
 		keyName = "alwaysPlay",
 		name = "Always play for",
-		description = "Items that always play it, comma separated. * is a wildcard",
-		position = 4
+		description = "Names, comma separated. * is a wildcard",
+		position = 5
 	)
 	default String alwaysPlay()
 	{
@@ -67,8 +78,8 @@ public interface ValuableDropSoundConfig extends Config
 	@ConfigItem(
 		keyName = "neverPlay",
 		name = "Never play for",
-		description = "Items that never play it, comma separated. * is a wildcard",
-		position = 5
+		description = "Names, comma separated. * is a wildcard",
+		position = 6
 	)
 	default String neverPlay()
 	{

@@ -36,27 +36,24 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStack;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.plugins.grounditems.GroundItemsConfig;
 import net.runelite.client.plugins.loottracker.LootReceived;
 import net.runelite.client.util.Text;
+import net.runelite.client.util.WildcardMatcher;
 import net.runelite.http.api.loottracker.LootRecordType;
 
 @PluginDescriptor(
 	name = "Valuable Drop Sound",
 	description = "Plays the game's own unique drop sound for valuable drops and new collection log items",
-	tags = {"loot", "drop", "sound", "valuable", "unique", "dt2", "collection", "log", "clog", "chest", "untradeable"}
+	tags = {"loot", "drop", "sound", "valuable", "unique", "dt2", "collection", "log", "clog", "chest", "untradeable",
+		"ground", "items", "highlight"}
 )
 public class ValuableDropSoundPlugin extends Plugin
 {
-	/**
-	 * The sound the Desert Treasure II bosses play for a unique. It was made for the Phantom Muspah and
-	 * the game reuses it for Araxxor, Yama and others, so it is the game's own sound for a big drop.
-	 */
+	/** The sound the Desert Treasure II bosses, Araxxor, Yama and others play for a unique. */
 	static final int UNIQUE_DROP_SOUND = 6765;
 
-	/**
-	 * Monsters whose uniques already come with the sound, going by the wiki. Anything they drop is left
-	 * to the game, so the player never hears it twice.
-	 */
+	/** Monsters that play the sound themselves, going by the wiki. Their drops are left to the game. */
 	private static final Set<String> NATIVE_BOSSES = ImmutableSet.of(
 		"vardorvis",
 		"duke sucellus",
@@ -70,11 +67,7 @@ public class ValuableDropSoundPlugin extends Plugin
 		"brutus"
 	);
 
-	/**
-	 * Monsters that play the sound for some of what they drop rather than for all of it, and the drops
-	 * they play it for. A kill that hands one of these over is left to the game, and everything else
-	 * they drop still counts.
-	 */
+	/** Monsters that play it for some of their drops only, and which drops those are. */
 	private static final Map<String, Set<String>> NATIVE_UNIQUES = ImmutableMap.of(
 		"frost dragon", ImmutableSet.of(
 			"dragon metal sheet",
@@ -88,27 +81,17 @@ public class ValuableDropSoundPlugin extends Plugin
 			"zaryte vambraces")
 	);
 
-	/**
-	 * The Lunar Chest for the Moons of Peril plays it for its uniques.
-	 */
+	/** The Lunar Chest plays it for its uniques. */
 	private static final String LUNAR_CHEST = "lunar chest";
 	private static final int LUNAR_CHEST_REGION = 6037;
 
 	private static final String COLLECTION_LOG_MESSAGE = "New item added to your collection log:";
 	private static final String COLLECTION_LOG_TITLE = "Collection log";
 
-	/**
-	 * How many ticks the sound covers. Anything else that would play it within this window is the same
-	 * moment, such as a drop that is also new to the collection log, or a pop-up that shows a little
-	 * after the chat message for the same item.
-	 */
+	/** How many ticks the sound covers, so one drop cannot play it twice. */
 	private static final int SOUND_TICKS = 2;
 
-	/**
-	 * How long the game playing it keeps this one quiet, in ticks. Hearing it means a drop has already
-	 * been announced, and the loot behind it can be reported a moment either side of the sound, so this
-	 * is a few ticks of grace rather than the one the sound landed on.
-	 */
+	/** How long the game playing it keeps this one quiet, in ticks, since loot is reported around it. */
 	private static final int GRACE_TICKS = 5;
 
 	private static final int NONE = -1;
@@ -122,35 +105,30 @@ public class ValuableDropSoundPlugin extends Plugin
 	@Inject
 	private ValuableDropSoundConfig config;
 
+	@Inject
+	private ConfigManager configManager;
+
+	/** The Ground Items plugin's settings, for its highlighted and hidden lists. */
+	private GroundItemsConfig groundItems;
+
 	// Changed from the settings panel's thread and read on the client's
 	private volatile List<Pattern> alwaysPlay = new ArrayList<>();
 	private volatile List<Pattern> neverPlay = new ArrayList<>();
+	private volatile List<Entry> highlighted = new ArrayList<>();
+	private volatile List<Entry> hidden = new ArrayList<>();
 
-	/**
-	 * The last tick the game played the sound itself, or loot came from somewhere that does, so a
-	 * collection log entry for it stays quiet too.
-	 */
+	/** The last tick the game played it itself, or loot came from somewhere that does. */
 	private int nativeTick = NONE;
 
 	private int playedTick = NONE;
 
-	/**
-	 * New collection log items, by name. One can be announced a moment before the loot it came from,
-	 * within the same frame, so they are held until the end of that frame, far too short to hear.
-	 */
+	/** New collection log items, held to the end of the frame, since loot can be reported after one. */
 	private final List<String> collectionLogItems = new ArrayList<>();
 
-	/**
-	 * An item is only ever new to the collection log once, so a second announcement of it, from the
-	 * pop-up after the chat message, is the same one. Items from loot that was already announced with
-	 * the sound, by this plugin or the game, go in here too, so their pop-up cannot play it again.
-	 */
+	/** Items already announced, so a pop-up after the chat message for one cannot play it again. */
 	private final Set<String> announcedItems = new HashSet<>();
 
-	/**
-	 * The pop-up's text is only filled in once it starts showing, so starting is noted and the text is
-	 * read when it gets there.
-	 */
+	/** The pop-up's text is only filled in once it starts, so the start is noted and read later. */
 	private boolean popupStarted;
 
 	private boolean playing;
@@ -164,6 +142,7 @@ public class ValuableDropSoundPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
+		groundItems = configManager.getConfig(GroundItemsConfig.class);
 		loadItemLists();
 	}
 
@@ -180,7 +159,8 @@ public class ValuableDropSoundPlugin extends Plugin
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
-		if (ValuableDropSoundConfig.GROUP.equals(event.getGroup()))
+		if (ValuableDropSoundConfig.GROUP.equals(event.getGroup())
+			|| GroundItemsConfig.GROUP.equals(event.getGroup()))
 		{
 			loadItemLists();
 		}
@@ -198,9 +178,7 @@ public class ValuableDropSoundPlugin extends Plugin
 		}
 	}
 
-	/**
-	 * The server reports every monster's loot here, which is also what the Loot Tracker plugin uses.
-	 */
+	/** The server reports every monster's loot here. */
 	@Subscribe
 	public void onServerNpcLoot(ServerNpcLoot event)
 	{
@@ -214,10 +192,7 @@ public class ValuableDropSoundPlugin extends Plugin
 		onLoot(null, event.getItems());
 	}
 
-	/**
-	 * Chests, caskets and raid rewards are only reported by the Loot Tracker plugin. It passes monster
-	 * loot on too, but that is already handled above.
-	 */
+	/** Chests, caskets and raid rewards are only reported by the Loot Tracker plugin. */
 	@Subscribe
 	public void onLootReceived(LootReceived event)
 	{
@@ -227,10 +202,7 @@ public class ValuableDropSoundPlugin extends Plugin
 		}
 	}
 
-	/**
-	 * The game can announce a new collection log item as a chat message, as a pop-up, or both,
-	 * depending on the player's settings. Either one counts.
-	 */
+	/** A new collection log item comes as a chat message, a pop-up, or both. Either one counts. */
 	@Subscribe
 	public void onChatMessage(ChatMessage event)
 	{
@@ -274,20 +246,14 @@ public class ValuableDropSoundPlugin extends Plugin
 		onGameSound(event.getSoundId());
 	}
 
-	/**
-	 * The game can also play the sound from a spot in the world, such as the tile the loot landed on,
-	 * and that arrives as an area sound rather than a plain one. Either way it is the same sound.
-	 */
+	/** The game can also play it from a tile, which arrives as an area sound. Same sound. */
 	@Subscribe
 	public void onAreaSoundEffectPlayed(AreaSoundEffectPlayed event)
 	{
 		onGameSound(event.getSoundId());
 	}
 
-	/**
-	 * A place missing from the lists above still does not play it twice, as long as the game got there
-	 * first.
-	 */
+	/** A place missing from the lists above still cannot play it twice, if the game got there first. */
 	private void onGameSound(int soundId)
 	{
 		if (soundId == UNIQUE_DROP_SOUND && !playing)
@@ -345,6 +311,7 @@ public class ValuableDropSoundPlugin extends Plugin
 
 		boolean valuable = config.valuableDrops();
 		boolean untradeable = config.untradeableDrops();
+		boolean highlights = config.groundItemsHighlights();
 		long minimum = config.minimumValue();
 
 		for (ItemStack item : items)
@@ -359,6 +326,7 @@ public class ValuableDropSoundPlugin extends Plugin
 
 			// A long, because a stack of something expensive can be worth more than an int holds
 			if (matches(alwaysPlay, name)
+				|| (highlights && isHighlighted(name, item.getQuantity()))
 				|| (untradeable && !composition.isTradeable())
 				|| (valuable && (long) itemManager.getItemPrice(item.getId()) * item.getQuantity() >= minimum))
 			{
@@ -382,9 +350,7 @@ public class ValuableDropSoundPlugin extends Plugin
 		return text.toLowerCase(Locale.ROOT);
 	}
 
-	/**
-	 * Whether a kill handed over one of the drops its monster plays the sound for itself.
-	 */
+	/** Whether a kill handed over one of the drops its monster plays the sound for itself. */
 	private boolean hasNativeUnique(String source, Collection<ItemStack> items)
 	{
 		Set<String> uniques = NATIVE_UNIQUES.get(source);
@@ -405,9 +371,8 @@ public class ValuableDropSoundPlugin extends Plugin
 	}
 
 	/**
-	 * Whether the game has played the sound itself recently enough that anything about to be announced
-	 * is most likely the drop it played for. A tick ahead of the count means a login has set the count
-	 * back, which leaves a tick from before it stale rather than recent.
+	 * Whether the game played it recently, so anything announced now is most likely that drop. A tick
+	 * ahead of the count is from before a login set the count back, and is stale.
 	 */
 	private boolean nativeRecently()
 	{
@@ -415,9 +380,7 @@ public class ValuableDropSoundPlugin extends Plugin
 		return nativeTick != NONE && nativeTick <= tick && nativeTick >= tick - GRACE_TICKS;
 	}
 
-	/**
-	 * Whether a collection log entry most likely came from somewhere that already played the sound.
-	 */
+	/** Whether a collection log entry most likely came from somewhere that already played it. */
 	private boolean nativeNearby()
 	{
 		if (nativeRecently())
@@ -464,18 +427,102 @@ public class ValuableDropSoundPlugin extends Plugin
 		}
 	}
 
-	/**
-	 * The lists are turned into patterns once, when they change, rather than for every item dropped.
-	 */
+	/** The lists are turned into patterns when they change, not for every item dropped. */
 	private void loadItemLists()
 	{
 		alwaysPlay = toPatterns(config.alwaysPlay());
 		neverPlay = toPatterns(config.neverPlay());
+		highlighted = toEntries(groundItems == null ? "" : groundItems.getHighlightItems());
+		hidden = toEntries(groundItems == null ? "" : groundItems.getHiddenItems());
 	}
 
-	/**
-	 * Turns a comma separated list of item names into patterns, where * matches any text.
-	 */
+	/** Whether Ground Items highlights this item. A name beats a *, a highlight beats a hide. */
+	private boolean isHighlighted(String itemName, int quantity)
+	{
+		return listed(highlighted, itemName, quantity, false)
+			|| (!listed(hidden, itemName, quantity, false) && listed(highlighted, itemName, quantity, true));
+	}
+
+	private static boolean listed(List<Entry> entries, String itemName, int quantity, boolean wildcards)
+	{
+		for (Entry entry : entries)
+		{
+			if (entry.wildcard == wildcards && entry.matches(itemName, quantity))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** An entry from a Ground Items list: a name, maybe with a *, and a quantity like "coins > 10000". */
+	private static final class Entry
+	{
+		private final String name;
+		private final int quantity;
+		private final boolean lessThan;
+		private final boolean wildcard;
+
+		private Entry(String name, int quantity, boolean lessThan, boolean wildcard)
+		{
+			this.name = name;
+			this.quantity = quantity;
+			this.lessThan = lessThan;
+			this.wildcard = wildcard;
+		}
+
+		private boolean matches(String itemName, int itemQuantity)
+		{
+			boolean named = wildcard ? WildcardMatcher.matches(name, itemName) : name.equalsIgnoreCase(itemName);
+			return named && (lessThan ? itemQuantity < quantity : itemQuantity > quantity);
+		}
+
+		/** The quantity follows a &lt; or &gt;, and goes with the sign when it is not a number. */
+		private static Entry of(String text)
+		{
+			boolean wildcard = text.indexOf('*') >= 0;
+			int quantity = 0;
+			boolean lessThan = false;
+
+			int i = text.length() - 1;
+			while (i >= 0 && (Character.isDigit(text.charAt(i)) || Character.isWhitespace(text.charAt(i))))
+			{
+				i--;
+			}
+
+			char sign = i < 0 ? 0 : text.charAt(i);
+			if ((sign == '<' || sign == '>') && i + 1 < text.length())
+			{
+				try
+				{
+					quantity = Integer.parseInt(text.substring(i + 1).trim());
+					lessThan = sign == '<';
+				}
+				catch (NumberFormatException ignored)
+				{
+					quantity = 0;
+				}
+				text = text.substring(0, i);
+			}
+
+			return new Entry(text.trim(), quantity, lessThan, wildcard);
+		}
+	}
+
+	private static List<Entry> toEntries(String list)
+	{
+		List<Entry> entries = new ArrayList<>();
+		for (String name : Text.fromCSV(list))
+		{
+			if (!name.isEmpty())
+			{
+				entries.add(Entry.of(name));
+			}
+		}
+		return entries;
+	}
+
+	/** Turns a comma separated list of item names into patterns, where * matches any text. */
 	private static List<Pattern> toPatterns(String list)
 	{
 		List<Pattern> patterns = new ArrayList<>();
